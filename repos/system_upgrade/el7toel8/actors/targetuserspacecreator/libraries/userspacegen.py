@@ -1,13 +1,16 @@
 import itertools
 import os
+import yum
 
 from leapp.exceptions import StopActorExecutionError
 from leapp.libraries.actor import constants
 from leapp.libraries.common import dnfplugin, mounting, overlaygen, rhsm, utils
 from leapp.libraries.common.config import get_product_type
-from leapp.libraries.stdlib import CalledProcessError, api, run, config
-from leapp.models import (RequiredTargetUserspacePackages, SourceRHSMInfo, StorageInfo, TargetRepositories,
-                          TargetUserSpaceInfo, UsedTargetRepositories, UsedTargetRepository, XFSPresence)
+from leapp.libraries.stdlib import CalledProcessError, api, config, run
+from leapp.models import (RequiredTargetUserspacePackages, SourceRHSMInfo,
+                          StorageInfo, TargetRepositories, TargetUserSpaceInfo,
+                          UsedTargetRepositories, UsedTargetRepository,
+                          XFSPresence)
 
 PROD_CERTS_FOLDER = 'prod-certs'
 
@@ -130,15 +133,22 @@ def _create_target_userspace_directories(target_userspace):
         )
 
 
-def gather_target_repositories(target_rhsm_info):
+def gather_target_repositories():
     """
     Performs basic checks on requirements for RHSM repositories and returns the list of target repository ids to use
     during the upgrade.
     """
+    target_rhsm_repoids = []
+    base = yum.YumBase()
+    repos = base.repos.repos.values()  # Get all the repos available to yum
+    for repo in repos:
+        if repo.repofile == '/etc/yum.repos.d/redhat.repo':
+            target_rhsm_repoids.append(repo.id)
+
     # FIXME: check that required repo IDs (baseos, appstream)
     # + or check that all required RHEL repo IDs are available.
     if not rhsm.skip_rhsm():
-        if not target_rhsm_info.available_repos or len(target_rhsm_info.available_repos) < 2:
+        if not target_rhsm_repoids or len(target_rhsm_repoids) < 2:
             raise StopActorExecutionError(
                 message='Cannot find required basic RHEL repositories.',
                 details={
@@ -153,7 +163,7 @@ def gather_target_repositories(target_rhsm_info):
     target_repoids = []
     for target_repo in api.consume(TargetRepositories):
         for rhel_repo in target_repo.rhel_repos:
-            if rhel_repo.repoid in target_rhsm_info.available_repos:
+            if rhel_repo.repoid in target_rhsm_repoids:
                 target_repoids.append(rhel_repo.repoid)
         for custom_repo in target_repo.custom_repos:
             # TODO: complete processing of custom repositories
@@ -188,30 +198,24 @@ def perform():
             storage_info=storage_info,
             xfs_info=xfs_info) as overlay:
         with overlay.nspawn() as context:
-            target_version = api.current_actor().configuration.version.target
-            with rhsm.switched_certificate(context, rhsm_info, prod_cert_path, target_version) as target_rhsm_info:
-                api.current_logger().debug('Target RHSM Info: SKUs: {skus} Repositories: {repos}'.format(
-                    repos=target_rhsm_info.enabled_repos,
-                    skus=rhsm_info.attached_skus if rhsm_info else []
-                ))
-                target_repoids = gather_target_repositories(target_rhsm_info)
-                api.current_logger().debug("Gathered target repositories: {}".format(', '.join(target_repoids)))
-                if not target_repoids:
-                    raise StopActorExecutionError(
-                        message='There are no enabled target repositories for the upgrade process to proceed.',
-                        details={'hint': (
-                            'Ensure your system is correctly registered with the subscription manager and that'
-                            ' your current subscription is entitled to install the requested target version {version}'
-                            ).format(version=api.current_actor().configuration.version.target)
-                        }
-                    )
-                prepare_target_userspace(context, constants.TARGET_USERSPACE, target_repoids, list(packages))
-                _prep_repository_access(context, constants.TARGET_USERSPACE)
-                dnfplugin.install(constants.TARGET_USERSPACE)
-                api.produce(UsedTargetRepositories(
-                    repos=[UsedTargetRepository(repoid=repo) for repo in target_repoids]))
-                api.produce(target_rhsm_info)
-                api.produce(TargetUserSpaceInfo(
-                    path=constants.TARGET_USERSPACE,
-                    scratch=constants.SCRATCH_DIR,
-                    mounts=constants.MOUNTS_DIR))
+            rhsm.switch_certificate(context, rhsm_info, prod_cert_path)
+            target_repoids = gather_target_repositories()
+            api.current_logger().debug("Gathered target repositories: {}".format(', '.join(target_repoids)))
+            if not target_repoids:
+                raise StopActorExecutionError(
+                    message='There are no enabled target repositories for the upgrade process to proceed.',
+                    details={'hint': (
+                        'Ensure your system is correctly registered with the subscription manager and that'
+                        ' your current subscription is entitled to install the requested target version {version}'
+                        ).format(version=api.current_actor().configuration.version.target)
+                    }
+                )
+            prepare_target_userspace(context, constants.TARGET_USERSPACE, target_repoids, list(packages))
+            _prep_repository_access(context, constants.TARGET_USERSPACE)
+            dnfplugin.install(constants.TARGET_USERSPACE)
+            api.produce(UsedTargetRepositories(
+                repos=[UsedTargetRepository(repoid=repo) for repo in target_repoids]))
+            api.produce(TargetUserSpaceInfo(
+                path=constants.TARGET_USERSPACE,
+                scratch=constants.SCRATCH_DIR,
+                mounts=constants.MOUNTS_DIR))
