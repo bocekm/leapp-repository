@@ -7,7 +7,6 @@ import time
 from leapp.exceptions import StopActorExecutionError
 from leapp.libraries.common.config import get_product_type
 from leapp.libraries.stdlib import CalledProcessError, api
-from leapp.models import TargetRHSMInfo
 
 _RE_REPO_UID = re.compile(r'Repo ID:\s*([^\s]+)')
 _RE_RELEASE = re.compile(r'Release:\s*([^\s]+)')
@@ -78,7 +77,7 @@ def _handle_rhsm_exceptions(hint=None):
 
 
 def skip_rhsm():
-    """ Function to check whether we should skip RHSM related code """
+    """ Check whether we should skip RHSM related code """
     return os.getenv('LEAPP_DEVEL_SKIP_RHSM', '0') == '1'
 
 
@@ -95,7 +94,7 @@ def with_rhsm(f):
 @with_rhsm
 def get_attached_skus(context, rhsm_info):
     """
-    Retrieves the list of SKU the system is attached to with the subscription manager.
+    Retrieve the list of SKU the system is attached to with the subscription manager.
 
     :param context: An instance of a mounting.IsolatedActions class
     :type context: mounting.IsolatedActions class
@@ -111,7 +110,7 @@ def get_attached_skus(context, rhsm_info):
 @with_rhsm
 def get_available_repo_uids(context, rhsm_info):
     """
-    Retrieves all available repositories names from the subscription manager.
+    Retrieve names of all the repositories available through the subscription-manager.
 
     :param context: An instance of a mounting.IsolatedActions class
     :type context: mounting.IsolatedActions class
@@ -127,7 +126,7 @@ def get_available_repo_uids(context, rhsm_info):
 @with_rhsm
 def get_enabled_repo_uids(context, rhsm_info):
     """
-    Retrieves all enabled repositories names from the subscription manager.
+    Retrieve names of all the repositories enabled through the subscription-manager.
 
     :param context: An instance of a mounting.IsolatedActions class
     :type context: mounting.IsolatedActions class
@@ -144,8 +143,7 @@ def get_enabled_repo_uids(context, rhsm_info):
 @_rhsm_retry(max_attempts=_ATTEMPTS, sleep=_RETRY_SLEEP)
 def unset_release(context):
     """
-    Unsets the configured release from the subscription manager so we can perform the upgrade.
-    Stores the previous set release in self.info if not already received.
+    Unset the configured release from the subscription manager.
 
     :param context: An instance of a mounting.IsolatedActions class
     :type context: mounting.IsolatedActions class
@@ -158,7 +156,7 @@ def unset_release(context):
 @_rhsm_retry(max_attempts=_ATTEMPTS, sleep=_RETRY_SLEEP)
 def set_release(context, release):
     """
-    This function will set the version specified.
+    Set the release (RHEL minor version) through the subscription-manager.
 
     :param context: An instance of a mounting.IsolatedActions class
     :type context: mounting.IsolatedActions class
@@ -167,20 +165,6 @@ def set_release(context, release):
     """
     with _handle_rhsm_exceptions():
         context.call(['subscription-manager', 'release', '--set', release], split=False)
-
-
-@with_rhsm
-def restore_release(context, rhsm_info):
-    """
-    If a release has been set, this function will restore it from the rhsm_info.release value.
-
-    :param context: An instance of a mounting.IsolatedActions class
-    :type context: mounting.IsolatedActions class
-    :param rhsm_info: An instance of a RHSMInfo derived model.
-    :type rhsm_info: RHSMInfo derived model
-    """
-    if rhsm_info.release:
-        set_release(context, rhsm_info.release)
 
 
 @with_rhsm
@@ -235,12 +219,12 @@ def get_existing_product_certificates(context, rhsm_info):
 
 
 @contextlib.contextmanager
-def switched_certificate(context, rhsm_info, cert_path, version):
+def switch_certificate(context, rhsm_info, cert_path):
     """
-    Performs all actions needed to switch the product certificate passed.
+    Perform all actions needed to switch the passed RHSM product certificate.
 
-    This function will copy the certificate to /etc/pki/product and if necessary /etc/pki/product-default and
-    removes other product certificates from there. Unsets the release and refreshes the subscription-manager.
+    This function will copy the certificate to /etc/pki/product, and /etc/pki/product-default if necessary, and
+    remove other product certificates from there.
 
     :param context: An instance of a mounting.IsolatedActions class
     :type context: mounting.IsolatedActions class
@@ -249,11 +233,7 @@ def switched_certificate(context, rhsm_info, cert_path, version):
     :param cert_path: Path to the product certificate to switch to.
     :type cert_path: string
     """
-    if skip_rhsm():
-        yield TargetRHSMInfo()
-        return
-
-    # Make a backup of product certificates
+    # Back up product certificates
     pki_path = '/etc/pki'
     pki_backup_path = '/etc/pki.bak'
     context.call(['rm', '-rf', pki_backup_path], checked=False)
@@ -269,29 +249,15 @@ def switched_certificate(context, rhsm_info, cert_path, version):
         if os.path.isdir(context.full_path(path)):
             context.copy_to(cert_path, os.path.join(path, os.path.basename(cert_path)))
 
-    unset_release(context)
-    try:
-        refresh(context)
-        # only ga has releases in rhsm
-        if get_product_type('target') == 'ga':
-            set_release(context, version)
-        target_rhsm_info = TargetRHSMInfo()
-        scan_rhsm_info(context, target_rhsm_info)
-        yield target_rhsm_info
-    finally:
-        # Restore backup of product certificates
-        context.call(['rm', '-rf', pki_path], checked=False)
-        context.call(['cp', '-a', pki_backup_path, pki_path], checked=False)
-        unset_release(context)
-        # Restore release - only ga has releases in rhsm
-        if get_product_type('source') == 'ga':
-            restore_release(context, rhsm_info)
+    # Restore product certificates from the backup
+    context.call(['rm', '-rf', pki_path], checked=False)
+    context.call(['cp', '-a', pki_backup_path, pki_path], checked=False)
 
 
 @with_rhsm
 def scan_rhsm_info(context, rhsm_info):
     """
-    Gathers all RHSM information
+    Gather all RHSM information
 
     :param context: An instance of a mounting.IsolatedActions class
     :type context: mounting.IsolatedActions class
