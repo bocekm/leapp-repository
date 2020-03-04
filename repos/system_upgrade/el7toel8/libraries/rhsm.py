@@ -15,6 +15,12 @@ _ATTEMPTS = 5
 _RETRY_SLEEP = 5
 
 
+class Repo(object):
+    def __init__(self):
+        self.id = None
+        self.file = None
+
+
 def _rhsm_retry(max_attempts, sleep=None):
     """
     A decorator to retry executing a function/method if unsuccessful.
@@ -107,10 +113,14 @@ def get_attached_skus(context, rhsm_info):
             rhsm_info.attached_skus = _RE_SKU_CONSUMED.findall(result['stdout'])
 
 
-@with_rhsm
 def get_available_repo_uids(context, rhsm_info):
+    """Deprecated. Repositories have ids, not uids. Use get_available_repo_ids instead."""
+    return get_available_repo_ids(context, rhsm_info)
+
+
+def get_available_repo_ids(context, rhsm_info):
     """
-    Retrieve names of all the repositories available through the subscription-manager.
+    Retrieve repo ids of all the repositories available through the subscription-manager.
 
     :param context: An instance of a mounting.IsolatedActions class
     :type context: mounting.IsolatedActions class
@@ -118,13 +128,58 @@ def get_available_repo_uids(context, rhsm_info):
     :type rhsm_info: RHSMInfo derived model
     """
     if not rhsm_info.available_repos:
-        with _handle_rhsm_exceptions():
-            result = context.call(['subscription-manager', 'repos'], split=False)
-            rhsm_info.available_repos = _RE_REPO_UID.findall(result['stdout'])
+        result = context.call(['yum', 'repoinfo'])
+        all_repos = list(get_repos(result['stdout']))
+        rhsm_info.available_repos = [repo.id for repo in all_repos if repo.file == '/etc/yum.repos.d/redhat.repo']
+
+
+def get_repos(repos_raw):
+    """
+    Generator providing all the repos available through yum/dnf.
+
+    :rtype: Iterator[:py:class:`leapp.libraries.common.rhsm.Repo`]
+    """
+    # TODO: Log a warning on the following msg that `yum repoinfo` may produce:
+    #  "Repository rhel-7-server-eus-rpms is listed more than once in the configuration"
+
+    # Split all the available repos per one repo
+    for repo_raw_params in re.findall(
+            r"Repo-id.*?Repo-filename.*?\n",
+            repos_raw,
+            re.DOTALL | re.MULTILINE):
+        yield parse_repo_params(repo_raw_params)
+
+
+def parse_repo_params(repo_raw_params):
+    """Parse multiline string holding repo parameters to distill the important ones."""
+    repo = Repo()
+    try:
+        repo.id = get_repo_param(r"^Repo-id\s+:\s+(.*?)(/.*)?$", repo_raw_params, "Repo-id")
+        repo.file = get_repo_param(r"^Repo-filename:\s+(.*?)$", repo_raw_params, "Repo-filename")
+    except ValueError, err:
+        api.current_logger().warn("Failed to parse the '%s' repo parameter of the `yum repoinfo` output", err.args[0])
+
+    return repo
+
+
+def get_repo_param(pattern, repo_raw_params, param):
+    """Parse a string with all the repo params to get the value of a single repo param."""
+    sub_attr = re.search(pattern,
+                         repo_raw_params,
+                         re.MULTILINE | re.DOTALL)
+    if sub_attr:
+        return sub_attr.group(1)
+    else:
+        raise ValueError(param)
+
+
+def get_enabled_repo_uids(context, rhsm_info):
+    """Deprecated. Repositories have ids, not uids. Use get_enabled_repo_ids instead."""
+    return get_enabled_repo_ids(context, rhsm_info)
 
 
 @with_rhsm
-def get_enabled_repo_uids(context, rhsm_info):
+def get_enabled_repo_ids(context, rhsm_info):
     """
     Retrieve names of all the repositories enabled through the subscription-manager.
 
@@ -265,7 +320,7 @@ def scan_rhsm_info(context, rhsm_info):
     :type rhsm_info: RHSMInfo derived model
     """
     get_attached_skus(context, rhsm_info)
-    get_available_repo_uids(context, rhsm_info)
-    get_enabled_repo_uids(context, rhsm_info)
+    get_available_repo_ids(context, rhsm_info)
+    get_enabled_repo_ids(context, rhsm_info)
     get_release(context, rhsm_info)
     get_existing_product_certificates(context, rhsm_info)

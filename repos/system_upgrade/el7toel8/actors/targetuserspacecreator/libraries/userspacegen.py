@@ -1,23 +1,23 @@
 import itertools
 import os
-import yum
 
+import yum
 from leapp.exceptions import StopActorExecutionError
 from leapp.libraries.actor import constants
 from leapp.libraries.common import dnfplugin, mounting, overlaygen, rhsm, utils
 from leapp.libraries.common.config import get_product_type
 from leapp.libraries.stdlib import CalledProcessError, api, config, run
 from leapp.models import (RequiredTargetUserspacePackages, SourceRHSMInfo,
-                          StorageInfo, TargetRepositories, TargetUserSpaceInfo,
-                          UsedTargetRepositories, UsedTargetRepository,
-                          XFSPresence)
+                          StorageInfo, TargetRepositories, TargetRHSMInfo,
+                          TargetUserSpaceInfo, UsedTargetRepositories,
+                          UsedTargetRepository, XFSPresence)
 
 PROD_CERTS_FOLDER = 'prod-certs'
 
 
 def prepare_target_userspace(context, userspace_dir, enabled_repos, packages):
     """
-    Implements the creation of the target userspace.
+    Implement the creation of the target userspace.
     """
     run(['rm', '-rf', userspace_dir])
     _create_target_userspace_directories(userspace_dir)
@@ -60,7 +60,7 @@ def _prep_repository_access(context, target_userspace):
 
 def _get_product_certificate_path():
     """
-    Retrieves the required / used product certificate for RHSM.
+    Retrieve the required / used product certificate for RHSM.
     """
     architecture = api.current_actor().configuration.architecture
     target_version = api.current_actor().configuration.version.target
@@ -133,37 +133,38 @@ def _create_target_userspace_directories(target_userspace):
         )
 
 
-def gather_target_repositories():
+def gather_target_repositories(context):
     """
-    Performs basic checks on requirements for RHSM repositories and returns the list of target repository ids to use
+    Perform basic checks on requirements for RHSM repositories and return the list of target repository ids to use
     during the upgrade.
+
+    :param context: An instance of a mounting.IsolatedActions class
+    :type context: mounting.IsolatedActions class
+    :return: List of target system repoids
+    :rtype: List(string)
     """
-    target_rhsm_repoids = []
-    base = yum.YumBase()
-    repos = base.repos.repos.values()  # Get all the repos available to yum
-    for repo in repos:
-        if repo.repofile == '/etc/yum.repos.d/redhat.repo':
-            target_rhsm_repoids.append(repo.id)
+    rhsm_info = TargetRHSMInfo()
+    rhsm.get_available_repo_ids(context, rhsm_info)
 
     # FIXME: check that required repo IDs (baseos, appstream)
     # + or check that all required RHEL repo IDs are available.
     if not rhsm.skip_rhsm():
-        if not target_rhsm_repoids or len(target_rhsm_repoids) < 2:
+        if not rhsm_info.available_repos or len(rhsm_info.available_repos) < 2:
             raise StopActorExecutionError(
-                message='Cannot find required basic RHEL repositories.',
+                message='Cannot find required basic RHEL 8 repositories.',
                 details={
-                    'hint': ('It is required to have RHEL repository on the system'
+                    'hint': ('It is required to have RHEL repositories on the system'
                              ' provided by the subscription-manager. Possibly you'
                              ' are missing a valid SKU for the target system or network'
                              ' connection failed. Check whether your system is attached'
-                             ' to the valid SKU providing target repositories.')
+                             ' to a valid SKU providing RHEL 8 repositories.')
                 }
             )
 
     target_repoids = []
     for target_repo in api.consume(TargetRepositories):
         for rhel_repo in target_repo.rhel_repos:
-            if rhel_repo.repoid in target_rhsm_repoids:
+            if rhel_repo.repoid in rhsm_info.available_repos:
                 target_repoids.append(rhel_repo.repoid)
         for custom_repo in target_repo.custom_repos:
             # TODO: complete processing of custom repositories
@@ -199,7 +200,7 @@ def perform():
             xfs_info=xfs_info) as overlay:
         with overlay.nspawn() as context:
             rhsm.switch_certificate(context, rhsm_info, prod_cert_path)
-            target_repoids = gather_target_repositories()
+            target_repoids = gather_target_repositories(context)
             api.current_logger().debug("Gathered target repositories: {}".format(', '.join(target_repoids)))
             if not target_repoids:
                 raise StopActorExecutionError(
