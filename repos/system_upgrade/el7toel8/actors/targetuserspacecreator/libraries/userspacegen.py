@@ -1,16 +1,15 @@
 import itertools
 import os
 
-import yum
 from leapp.exceptions import StopActorExecutionError
 from leapp.libraries.actor import constants
 from leapp.libraries.common import dnfplugin, mounting, overlaygen, rhsm, utils
 from leapp.libraries.common.config import get_product_type
 from leapp.libraries.stdlib import CalledProcessError, api, config, run
-from leapp.models import (RequiredTargetUserspacePackages, SourceRHSMInfo,
-                          StorageInfo, TargetRepositories, TargetRHSMInfo,
-                          TargetUserSpaceInfo, UsedTargetRepositories,
-                          UsedTargetRepository, XFSPresence)
+from leapp.models import (RequiredTargetUserspacePackages, RHSMInfo,
+                          StorageInfo, TargetRepositories, TargetUserSpaceInfo,
+                          UsedTargetRepositories, UsedTargetRepository,
+                          XFSPresence)
 
 PROD_CERTS_FOLDER = 'prod-certs'
 
@@ -143,13 +142,13 @@ def gather_target_repositories(context):
     :return: List of target system repoids
     :rtype: List(string)
     """
-    rhsm_info = TargetRHSMInfo()
-    rhsm.get_available_repo_ids(context, rhsm_info)
+    # Get the RHSM repos available in the RHEL 8 container
+    available_repos = rhsm.get_available_repo_ids(context)
 
     # FIXME: check that required repo IDs (baseos, appstream)
     # + or check that all required RHEL repo IDs are available.
     if not rhsm.skip_rhsm():
-        if not rhsm_info.available_repos or len(rhsm_info.available_repos) < 2:
+        if not available_repos or len(available_repos) < 2:
             raise StopActorExecutionError(
                 message='Cannot find required basic RHEL 8 repositories.',
                 details={
@@ -164,7 +163,7 @@ def gather_target_repositories(context):
     target_repoids = []
     for target_repo in api.consume(TargetRepositories):
         for rhel_repo in target_repo.rhel_repos:
-            if rhel_repo.repoid in rhsm_info.available_repos:
+            if rhel_repo.repoid in available_repos:
                 target_repoids.append(rhel_repo.repoid)
         for custom_repo in target_repo.custom_repos:
             # TODO: complete processing of custom repositories
@@ -182,7 +181,8 @@ def perform():
     for message in api.consume(RequiredTargetUserspacePackages):
         packages.update(message.packages)
 
-    rhsm_info = next(api.consume(SourceRHSMInfo), None)
+    # Get the RHSM information (available repos, attached SKUs, etc.) of the source (RHEL 7) system
+    rhsm_info = next(api.consume(RHSMInfo), None)
     if not rhsm_info and not rhsm.skip_rhsm():
         api.current_logger().warn('Could not receive RHSM information - Is this system registered?')
         return
