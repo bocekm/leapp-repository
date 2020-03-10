@@ -293,7 +293,6 @@ def get_existing_product_certificates(context):
         return certs
 
 
-@contextlib.contextmanager
 def switch_certificate(context, rhsm_info, cert_path):
     """
     Perform all actions needed to switch the passed RHSM product certificate.
@@ -308,12 +307,6 @@ def switch_certificate(context, rhsm_info, cert_path):
     :param cert_path: Path to the product certificate to switch to
     :type cert_path: string
     """
-    # Back up product certificates
-    pki_path = '/etc/pki'
-    pki_backup_path = '/etc/pki.bak'
-    context.call(['rm', '-rf', pki_backup_path], checked=False)
-    context.call(['cp', '-a', pki_path, pki_backup_path], checked=False)
-
     for existing in rhsm_info.existing_product_certificates:
         try:
             context.remove(existing)
@@ -323,10 +316,6 @@ def switch_certificate(context, rhsm_info, cert_path):
     for path in ('/etc/pki/product', '/etc/pki/product-default'):
         if os.path.isdir(context.full_path(path)):
             context.copy_to(cert_path, os.path.join(path, os.path.basename(cert_path)))
-
-    # Restore product certificates from the backup
-    context.call(['rm', '-rf', pki_path], checked=False)
-    context.call(['cp', '-a', pki_backup_path, pki_path], checked=False)
 
 
 @with_rhsm
