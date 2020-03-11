@@ -186,7 +186,7 @@ def _parse_repo_params(repo_raw_params):
         repoid = _get_repo_param(r'^Repo-id\s+:\s+([^/]+).*?$', repo_raw_params, 'Repo-id')
         repofile = _get_repo_param(r'^Repo-filename:\s+(.*?)$', repo_raw_params, 'Repo-filename')
         return namedtuple('Repository', ['repoid', 'file'])(repoid, repofile)
-    except ValueError, err:
+    except ValueError as err:
         api.current_logger().warn("Failed to parse the '%s' repo parameter of the `yum repoinfo` output", err.args[0])
 
 
