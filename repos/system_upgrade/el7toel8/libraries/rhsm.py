@@ -121,7 +121,7 @@ def get_available_repo_ids(context):
     result = context.call(['yum', 'repoinfo'])
     _inhibit_on_duplicate_repos(result['stderr'])
     all_repos = list(_get_repos(result['stdout']))
-    available_repos = [repo.id for repo in all_repos if repo.file == _DEFAULT_RHSM_REPOFILE]
+    available_repos = [repo.repoid for repo in all_repos if repo.file == _DEFAULT_RHSM_REPOFILE]
     list_separator_fmt = '\n    - '
     api.current_logger().info('The following repoids are available through RHSM:{0}{1}'.
                               format(
