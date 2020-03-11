@@ -197,8 +197,7 @@ def _get_repo_param(pattern, repo_raw_params, param):
                          re.MULTILINE | re.DOTALL)
     if sub_attr:
         return sub_attr.group(1)
-    else:
-        raise ValueError(param, repo_raw_params)
+    raise ValueError(param, repo_raw_params)
 
 
 @with_rhsm
