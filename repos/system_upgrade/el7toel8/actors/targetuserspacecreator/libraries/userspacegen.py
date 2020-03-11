@@ -143,7 +143,7 @@ def gather_target_repositories(context):
     :rtype: List(string)
     """
     # Get the RHSM repos available in the RHEL 8 container
-    available_repos = rhsm.get_available_repo_ids(context)
+    available_repos = rhsm.get_available_repo_ids(context, releasever=api.current_actor().configuration.version.target)
 
     # FIXME: check that required repo IDs (baseos, appstream)
     # + or check that all required RHEL repo IDs are available.

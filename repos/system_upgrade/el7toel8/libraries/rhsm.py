@@ -109,16 +109,27 @@ def get_attached_skus(context):
         return _RE_SKU_CONSUMED.findall(result['stdout'])
 
 
-def get_available_repo_ids(context):
+def get_available_repo_ids(context, releasever=None):
     """
     Retrieve repo ids of all the repositories available through the subscription-manager.
 
     :param context: An instance of a mounting.IsolatedActions class
     :type context: mounting.IsolatedActions class
+    :param releasever: Release version to pass to the `yum repoinfo` command
+    :type releasever: string
     :return: Repositories that are available to the current system through the subscription-manager
     :rtype: List(string)
     """
-    result = context.call(['yum', 'repoinfo'])
+    cmd = ['yum', 'repoinfo']
+    if releasever:
+        cmd.extend(['--releasever', releasever])
+    try:
+        result = context.call(cmd)
+    except CalledProcessError as exc:
+        raise StopActorExecutionError(
+            'Unable to get list of available yum repositories.',
+            details={'details': str(exc), 'stderr': exc.stderr}
+        )
     _inhibit_on_duplicate_repos(result['stderr'])
     all_repos = list(_get_repos(result['stdout']))
     available_repos = [repo.repoid for repo in all_repos if repo.file == _DEFAULT_RHSM_REPOFILE]
@@ -320,7 +331,9 @@ def switch_certificate(context, rhsm_info, cert_path):
 @with_rhsm
 def scan_rhsm_info(context):
     """
-    Gather all the RHSM information.
+    Gather all the RHSM information of the source system.
+
+    It's not intended for gathering RHSM info about the target system within a container.
 
     :param context: An instance of a mounting.IsolatedActions class
     :type context: mounting.IsolatedActions class
