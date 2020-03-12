@@ -16,8 +16,10 @@ class CurrentActorMocked(object):
 
 def test_gather_target_repositories(monkeypatch):
     monkeypatch.setattr(api, 'current_actor', CurrentActorMocked)
+    # The available RHSM repos
     monkeypatch.setattr(rhsm, 'get_available_repo_ids', lambda x, releasever: ['repoidX', 'repoidY', 'repoidZ'])
     monkeypatch.setattr(rhsm, 'skip_rhsm', lambda: False)
+    # The required RHEL repos based on the repo mapping and PES data + custom repos required by third party actors
     monkeypatch.setattr(api, 'consume', lambda x: iter([TargetRepositories(
         rhel_repos=[RHELTargetRepository(repoid='repoidX'),
                     RHELTargetRepository(repoid='repoidY')],
@@ -25,13 +27,33 @@ def test_gather_target_repositories(monkeypatch):
 
     target_repoids = userspacegen.gather_target_repositories(None)
 
-    assert all([a == b for a, b in zip(target_repoids, ['repoidX', 'repoidY'])])
+    assert target_repoids == ['repoidX', 'repoidY', 'repoidCustom']
 
 
-def test_gather_target_repositories_no_available(monkeypatch):
+def test_gather_target_repositories_none_available(monkeypatch):
     monkeypatch.setattr(api, 'current_actor', CurrentActorMocked)
     monkeypatch.setattr(rhsm, 'get_available_repo_ids', lambda x, releasever: [])
     monkeypatch.setattr(rhsm, 'skip_rhsm', lambda: False)
     with pytest.raises(StopActorExecutionError) as err:
         userspacegen.gather_target_repositories(None)
-    assert "Cannot find" in str(err)
+    assert "Cannot find required basic RHEL 8 repositories" in str(err)
+
+
+@pytest.mark.skip(reason="Currently not implemented in the actor. It's TODO.")
+def test_gather_target_repositories_required_not_available(monkeypatch):
+    # If the repos that Leapp identifies as required for the upgrade (based on the repo mapping and PES data) are not
+    # available, an exception shall be raised
+
+    monkeypatch.setattr(api, 'current_actor', CurrentActorMocked)
+    # The available RHSM repos
+    monkeypatch.setattr(rhsm, 'get_available_repo_ids', lambda x, releasever: ['repoidA', 'repoidB', 'repoidC'])
+    monkeypatch.setattr(rhsm, 'skip_rhsm', lambda: False)
+    # The required RHEL repos based on the repo mapping and PES data + custom repos required by third party actors
+    monkeypatch.setattr(api, 'consume', lambda x: iter([TargetRepositories(
+        rhel_repos=[RHELTargetRepository(repoid='repoidX'),
+                    RHELTargetRepository(repoid='repoidY')],
+        custom_repos=[CustomTargetRepository(repoid='repoidCustom')])]))
+
+    with pytest.raises(StopActorExecutionError) as err:
+        userspacegen.gather_target_repositories(None)
+    assert "Cannot find required basic RHEL 8 repositories" in str(err)

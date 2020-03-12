@@ -165,6 +165,10 @@ def gather_target_repositories(context):
         for rhel_repo in target_repo.rhel_repos:
             if rhel_repo.repoid in available_repos:
                 target_repoids.append(rhel_repo.repoid)
+            else:
+                # TODO: We shall report that the RHEL repos that we deem necessary for the upgrade are not available.
+                # The StopActorExecutionError called above might be moved here.
+                pass
         for custom_repo in target_repo.custom_repos:
             # TODO: complete processing of custom repositories
             # HINT: now it will work only for custom repos that exist

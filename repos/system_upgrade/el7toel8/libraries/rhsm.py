@@ -131,22 +131,22 @@ def get_available_repo_ids(context, releasever=None):
             details={'details': str(exc), 'stderr': exc.stderr}
         )
     _inhibit_on_duplicate_repos(result['stderr'])
-    all_repos = list(_get_repos(result['stdout']))
-    available_repos = [repo.repoid for repo in all_repos if repo.file == _DEFAULT_RHSM_REPOFILE]
+    available_repos = list(_get_repos(result['stdout']))
+    available_rhsm_repos = [repo.repoid for repo in available_repos if repo.file == _DEFAULT_RHSM_REPOFILE]
     list_separator_fmt = '\n    - '
-    api.current_logger().info('The following repoids are available through RHSM:{0}{1}'.
-                              format(
-                                  list_separator_fmt,
-                                  list_separator_fmt.join(available_repos)
-                              ))
-    return available_repos
+    if available_rhsm_repos:
+        api.current_logger().info('The following repoids are available through RHSM:{0}{1}'
+                                  .format(list_separator_fmt, list_separator_fmt.join(available_rhsm_repos)))
+    else:
+        api.current_logger().info('There are no repos available through RHSM.')
+    return available_rhsm_repos
 
 
 def _inhibit_on_duplicate_repos(repos_raw_stderr):
     """
-    Inhibit the updgrade if a single repo is defined multiple times.
+    Inhibit the upgrade if any repoid is defined multiple times.
 
-    When that happens, it not only shows miscofigured system, but then we can't get the details of all the available
+    When that happens, it not only shows misconfigured system, but then we can't get details of all the available
     repos as well.
     """
     duplicates = []
@@ -157,20 +157,14 @@ def _inhibit_on_duplicate_repos(repos_raw_stderr):
     if not duplicates:
         return
     list_separator_fmt = '\n    - '
-    api.current_logger().warn('The following repoids are defined multiple times:{0}{1}'.
-                              format(
-                                  list_separator_fmt,
-                                  list_separator_fmt.join(duplicates)
-                              ))
+    api.current_logger().warn('The following repoids are defined multiple times:{0}{1}'
+                              .format(list_separator_fmt, list_separator_fmt.join(duplicates)))
 
     reporting.create_report([
         reporting.Title('A YUM/DNF repository defined multiple times'),
         reporting.Summary(
             'The `yum repoinfo` command reports that the following repositories are defined multiple times:{0}{1}'.
-            format(
-                list_separator_fmt,
-                list_separator_fmt.join(duplicates)
-            )
+            format(list_separator_fmt, list_separator_fmt.join(duplicates))
         ),
         reporting.Severity(reporting.Severity.MEDIUM),
         reporting.Tags([reporting.Tags.REPOSITORY]),
@@ -179,36 +173,39 @@ def _inhibit_on_duplicate_repos(repos_raw_stderr):
     ])
 
 
-def _get_repos(repos_raw_stdout):
+def _get_repos(repos_stdout_raw):
     """
     Generator providing all the repos available through yum/dnf.
 
     :rtype: Iterator[:py:class:`leapp.libraries.common.rhsm.Repo`]
     """
     # Split all the available repos per one repo
-    for repo_raw_params in re.findall(
-            r"Repo-id.*?Repo-filename.*?\n", repos_raw_stdout, re.DOTALL | re.MULTILINE):
-        yield _parse_repo_params(repo_raw_params)
+    for repo_params_raw in re.findall(
+            r"Repo-id.*?Repo-filename.*?\n", repos_stdout_raw, re.DOTALL | re.MULTILINE):
+        yield _parse_repo_params(repo_params_raw)
 
 
-def _parse_repo_params(repo_raw_params):
+def _parse_repo_params(repo_params_raw):
     """Parse multiline string holding repo parameters to distill the important ones."""
     try:
-        repoid = _get_repo_param(r'^Repo-id\s+:\s+([^/]+).*?$', repo_raw_params, 'Repo-id')
-        repofile = _get_repo_param(r'^Repo-filename:\s+(.*?)$', repo_raw_params, 'Repo-filename')
+        repoid = _get_repo_param(r'Repo-id\s+:\s+([^/]+).*?\n', repo_params_raw, 'Repo-id')
+        repofile = _get_repo_param(r'Repo-filename:\s+(.*?)\n', repo_params_raw, 'Repo-filename')
         return namedtuple('Repository', ['repoid', 'file'])(repoid, repofile)
     except ValueError as err:
         api.current_logger().warn("Failed to parse the '%s' repo parameter of the `yum repoinfo` output", err.args[0])
+        #TODO: End with StopActorExecutionError?
 
 
-def _get_repo_param(pattern, repo_raw_params, param):
+def _get_repo_param(pattern, repo_params_raw, param):
     """Parse a string with all the repo params to get the value of a single repo param."""
-    sub_attr = re.search(pattern,
-                         repo_raw_params,
-                         re.MULTILINE | re.DOTALL)
-    if sub_attr:
-        return sub_attr.group(1)
-    raise ValueError(param, repo_raw_params)
+    import pdb
+    pdb.set_trace()
+    repo_param = re.search(pattern,
+                           repo_params_raw,
+                           re.MULTILINE | re.DOTALL)
+    if repo_param:
+        return repo_param.group(1)
+    raise ValueError(param, repo_params_raw)
 
 
 @with_rhsm
