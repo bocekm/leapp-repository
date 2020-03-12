@@ -1,7 +1,7 @@
 import itertools
 import os
 
-from leapp.exceptions import StopActorExecutionError
+from leapp.exceptions import StopActorExecution, StopActorExecutionError
 from leapp.libraries.actor import constants
 from leapp.libraries.common import dnfplugin, mounting, overlaygen, rhsm, utils
 from leapp.libraries.common.config import get_product_type
@@ -177,10 +177,21 @@ def gather_target_repositories(context):
             # + outside of rhsm..
             # #if custom_repo.repoid in available_target_repoids:
             target_repoids.append(custom_repo.repoid)
+    api.current_logger().debug("Gathered target repositories: {}".format(', '.join(target_repoids)))
+    if not target_repoids:
+        raise StopActorExecutionError(
+            message='There are no enabled target repositories for the upgrade process to proceed.',
+            details={'hint': (
+                'Ensure your system is correctly registered with the subscription manager and that'
+                ' your current subscription is entitled to install the requested target version {version}'
+                ).format(version=api.current_actor().configuration.version.target)
+            }
+        )
     return target_repoids
 
 
-def perform():
+def _consume_data():
+    """Wrapper function to consume all input data."""
     packages = {'dnf'}
     for message in api.consume(RequiredTargetUserspacePackages):
         packages.update(message.packages)
@@ -189,13 +200,36 @@ def perform():
     rhsm_info = next(api.consume(RHSMInfo), None)
     if not rhsm_info and not rhsm.skip_rhsm():
         api.current_logger().warn('Could not receive RHSM information - Is this system registered?')
-        return
+        raise StopActorExecution()
 
     xfs_info = next(api.consume(XFSPresence), XFSPresence())
     storage_info = next(api.consume(StorageInfo), None)
     if not storage_info:
-        api.current_logger.error('No storage info available cannot proceed.')
+        raise StopActorExecutionError('No storage info available cannot proceed.')
+    return packages, rhsm_info, xfs_info, storage_info
 
+
+def _gather_target_repositories(context, rhsm_info, prod_cert_path):
+    """
+    This is wrapper function to gather the target repoids.
+
+    Probably the function could be partially merged into gather_target_repositories
+    and this could be really just wrapper with the switch of certificates.
+    I am keeping that for now as it is as interim step.
+    """
+    rhsm.switch_certificate(context, rhsm_info, prod_cert_path)
+    return gather_target_repositories(context)
+
+
+def _create_target_userspace(context, packages, target_repoids):
+    """Create the target userspace."""
+    prepare_target_userspace(context, constants.TARGET_USERSPACE, target_repoids, list(packages))
+    _prep_repository_access(context, constants.TARGET_USERSPACE)
+    dnfplugin.install(constants.TARGET_USERSPACE)
+
+
+def perform():
+    packages, rhsm_info, xfs_info, storage_info = _consume_data()
     prod_cert_path = _get_product_certificate_path()
     with overlaygen.create_source_overlay(
             mounts_dir=constants.MOUNTS_DIR,
@@ -203,21 +237,8 @@ def perform():
             storage_info=storage_info,
             xfs_info=xfs_info) as overlay:
         with overlay.nspawn() as context:
-            rhsm.switch_certificate(context, rhsm_info, prod_cert_path)
-            target_repoids = gather_target_repositories(context)
-            api.current_logger().debug("Gathered target repositories: {}".format(', '.join(target_repoids)))
-            if not target_repoids:
-                raise StopActorExecutionError(
-                    message='There are no enabled target repositories for the upgrade process to proceed.',
-                    details={'hint': (
-                        'Ensure your system is correctly registered with the subscription manager and that'
-                        ' your current subscription is entitled to install the requested target version {version}'
-                        ).format(version=api.current_actor().configuration.version.target)
-                    }
-                )
-            prepare_target_userspace(context, constants.TARGET_USERSPACE, target_repoids, list(packages))
-            _prep_repository_access(context, constants.TARGET_USERSPACE)
-            dnfplugin.install(constants.TARGET_USERSPACE)
+            target_repoids = _gather_target_repositories(context, rhsm_info, prod_cert_path)
+            _create_target_userspace(context, packages, target_repoids)
             api.produce(UsedTargetRepositories(
                 repos=[UsedTargetRepository(repoid=repo) for repo in target_repoids]))
             api.produce(TargetUserSpaceInfo(
