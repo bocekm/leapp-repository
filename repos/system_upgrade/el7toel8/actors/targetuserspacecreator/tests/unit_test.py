@@ -41,8 +41,8 @@ def test_gather_target_repositories_none_available(monkeypatch):
 
 @pytest.mark.skip(reason="Currently not implemented in the actor. It's TODO.")
 def test_gather_target_repositories_required_not_available(monkeypatch):
-    # If the repos that Leapp identifies as required for the upgrade (based on the repo mapping and PES data) are not
-    # available, an exception shall be raised
+    # If the repos Leapp has identified as required for the upgrade, based on the repo mapping and PES data,
+    # an exception shall be raised
 
     monkeypatch.setattr(api, 'current_actor', CurrentActorMocked)
     # The available RHSM repos
