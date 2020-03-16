@@ -289,14 +289,15 @@ def get_existing_product_certificates(context):
     :return: Paths to product certificates that are currently installed on the system.
     :rtype: List(string)
     """
+    certs = []
     for path in ('/etc/pki/product', '/etc/pki/product-default'):
         if not os.path.isdir(context.full_path(path)):
             continue
-        certs = [os.path.join(path, f) for f in os.listdir(context.full_path(path))
-                 if os.path.isfile(os.path.join(context.full_path(path), f))]
-        if not certs:
-            continue
-        return certs
+        curr_certs = [os.path.join(path, f) for f in os.listdir(context.full_path(path))
+                      if os.path.isfile(os.path.join(context.full_path(path), f))]
+        if curr_certs:
+            certs.extend(curr_certs)
+    return certs
 
 
 def set_container_mode(context):
