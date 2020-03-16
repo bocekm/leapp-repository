@@ -217,6 +217,7 @@ def _gather_target_repositories(context, rhsm_info, prod_cert_path):
     and this could be really just wrapper with the switch of certificates.
     I am keeping that for now as it is as interim step.
     """
+    rhsm.set_container_mode(context)
     rhsm.switch_certificate(context, rhsm_info, prod_cert_path)
     return gather_target_repositories(context)
 

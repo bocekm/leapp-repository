@@ -299,6 +299,29 @@ def get_existing_product_certificates(context):
         return certs
 
 
+def set_container_mode(context):
+    """
+    Put RHSM into the container mode.
+
+    Inside the container, we have to ensure the RHSM is not used AND that host
+    is not affected. If the RHSM is not set into the container mode, the host
+    could be affected and the generated repo file in the container could be
+    affected as well (e.g. when the release is set, using rhsm, on the host).
+
+    :param context: An instance of a mounting.IsolatedActions class
+    :type context: mounting.IsolatedActions class
+    """
+    if not context.is_isolated():
+        api.current_logger().error('Trying to set RHSM into the container mode'
+                                   'on host. Skipping the action.')
+        return
+    try:
+        context.call(['ln', '-s', '/etc/rhsm', '/etc/rhsm-host'])
+    except CalledProcessError:
+        raise StopActorExecutionError(
+                message='Cannot set the container mode for the subscription-manager.')
+
+
 def switch_certificate(context, rhsm_info, cert_path):
     """
     Perform all actions needed to switch the passed RHSM product certificate.
